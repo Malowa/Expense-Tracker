@@ -1,0 +1,429 @@
+import csv
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from datetime import datetime
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
+FILE_NAME = 'transactions.csv'  # now stores both Income and Expenditure
+
+def init_file():
+    # create CSV with headers if missing
+    if not os.path.exists(FILE_NAME):
+        with open(FILE_NAME, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Date', 'Type', 'Category', 'Description', 'Amount'])
+
+def add_transaction():
+    date = date_entry.get().strip()
+    ttype = type_var.get().strip()  # "Income" or "Expenditure"
+    category = category_entry.get().strip()
+    description = description_entry.get().strip()
+    amount_text = amount_entry.get().strip()
+
+    if not (date and ttype and category and description and amount_text):
+        messagebox.showerror("Error", "All fields are required.")
+        return
+
+    # validate date
+    try:
+        datetime.strptime(date, '%Y-%m-%d')
+    except ValueError:
+        messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+        return
+
+    # validate amount
+    try:
+        amount = float(amount_text)
+    except ValueError:
+        messagebox.showerror("Error", "Amount must be a number.")
+        return
+
+    if amount < 0:
+        messagebox.showerror("Error", "Please enter a positive number for amount.")
+        return
+
+    # append row
+    with open(FILE_NAME, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([date, ttype, category, description, f"{amount:.2f}"])
+
+    messagebox.showinfo("Transaction added", f"{ttype} on {date} added successfully.")
+    clear_entries()
+    load_transactions()
+
+def clear_entries():
+    # keep date default
+    # date_entry.delete(0, tk.END)
+    # date_entry.insert(0, datetime.now().strftime('%Y-%m-%d'))
+    type_combo.set("Expenditure")
+    category_entry.delete(0, tk.END)
+    description_entry.delete(0, tk.END)
+    amount_entry.delete(0, tk.END)
+
+def load_transactions():
+    # clear table
+    for row in trans_table.get_children():
+        trans_table.delete(row)
+
+    total_income = 0.0
+    total_expenditure = 0.0
+
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, mode='r', newline='') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                trans_table.insert("", tk.END, values=(
+                    row["Date"], row["Type"], row["Category"], row["Description"], row["Amount"]
+                ))
+                amt = 0.0
+                try:
+                    amt = float(row["Amount"])
+                except Exception:
+                    pass
+                if row["Type"].lower() == "income":
+                    total_income += amt
+                else:
+                    total_expenditure += amt
+    else:
+        messagebox.showinfo("Info", "No transactions file found. A new one will be created when you add a transaction.")
+
+    net = total_income - total_expenditure
+    total_label.config(text=f"Income: KES {total_income:.2f}    Expenditure: KES {total_expenditure:.2f}    Net: KES {net:.2f}")
+
+def search_transactions(query):
+    query = query.strip().lower()
+    for row in trans_table.get_children():
+        trans_table.delete(row)
+
+    total_income = 0.0
+    total_expenditure = 0.0
+    found = False
+
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, mode='r', newline='') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                if (query in row["Category"].lower()) or (query in row["Description"].lower()) or (query in row["Type"].lower()):
+                    trans_table.insert("", tk.END, values=(
+                        row["Date"], row["Type"], row["Category"], row["Description"], row["Amount"]
+                    ))
+                    found = True
+                    try:
+                        amt = float(row["Amount"])
+                    except Exception:
+                        amt = 0.0
+                    if row["Type"].lower() == "income":
+                        total_income += amt
+                    else:
+                        total_expenditure += amt
+        if not found:
+            messagebox.showinfo("Search Result", "No transactions found matching your search.")
+    else:
+        messagebox.showerror("Error", "No transactions found.")
+
+    net = total_income - total_expenditure
+    total_label.config(text=f"Income: KES {total_income:.2f}    Expenditure: KES {total_expenditure:.2f}    Net: KES {net:.2f}")
+
+def delete_transaction():
+    selected_item = trans_table.selection()
+    if not selected_item:
+        messagebox.showerror("Error", "No transaction selected.")
+        return
+
+    confirm = messagebox.askyesno("Delete", "Are you sure you want to delete the selected transaction?")
+    if not confirm:
+        return
+
+    values = trans_table.item(selected_item, 'values')
+    # values order: Date, Type, Category, Description, Amount
+    date, ttype, category, description, amount = values
+
+    # remove from treeview
+    trans_table.delete(selected_item)
+    # rebuild CSV without that exact row (first matching)
+    updated_rows = []
+    deleted = False
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, mode='r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                if (not deleted) and row['Date'] == date and row['Type'] == ttype and row['Category'] == category and row['Description'] == description and row['Amount'] == amount:
+                    deleted = True
+                    continue
+                updated_rows.append(row)
+
+        with open(FILE_NAME, mode='w', newline='') as file:
+            fieldnames = ['Date', 'Type', 'Category', 'Description', 'Amount']
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in updated_rows:
+                writer.writerow(r)
+
+    messagebox.showinfo("Deleted", "Transaction deleted successfully.")
+    load_transactions()
+
+def show_category_bar_chart():
+    if not os.path.exists(FILE_NAME):
+        messagebox.showerror("Error", "No transactions found to display.")
+        return
+
+    income_totals = defaultdict(float)
+    expense_totals = defaultdict(float)
+
+    with open(FILE_NAME, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            category = row['Category']
+            try:
+                amount = float(row['Amount'])
+            except Exception:
+                amount = 0.0
+            if row['Type'].lower() == 'income':
+                income_totals[category] += amount
+            else:
+                expense_totals[category] += amount
+
+    categories = sorted(set(list(income_totals.keys()) + list(expense_totals.keys())))
+    if not categories:
+        messagebox.showinfo("Info", "No category data to display.")
+        return
+
+    incomes = [income_totals.get(c, 0.0) for c in categories]
+    expenses = [expense_totals.get(c, 0.0) for c in categories]
+
+    x = range(len(categories))
+    width = 0.35
+
+    plt.figure(figsize=(12, 6))
+    plt.bar([i - width/2 for i in x], incomes, width, label='Income', color='green')
+    plt.bar([i + width/2 for i in x], expenses, width, label='Expenditure', color='red')
+    plt.xlabel("Category")
+    plt.ylabel("Amount (KES)")
+    plt.title("Income vs Expenditure by Category")
+    plt.xticks(x, categories, rotation=45, ha='right')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def show_spending_pie_chart():
+    # pie for expenditures only
+    if not os.path.exists(FILE_NAME):
+        messagebox.showerror("Error", "No transactions found to display.")
+        return
+
+    expense_totals = defaultdict(float)
+    with open(FILE_NAME, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['Type'].lower() != 'expenditure':
+                continue
+            category = row['Category']
+            try:
+                amount = float(row['Amount'])
+            except Exception:
+                amount = 0.0
+            expense_totals[category] += amount
+
+    if not expense_totals:
+        messagebox.showinfo("Info", "No expenditure data to plot.")
+        return
+
+    categories = list(expense_totals.keys())
+    totals = list(expense_totals.values())
+
+    plt.figure(figsize=(6, 6))
+    plt.pie(totals, labels=categories, autopct='%1.1f%%', startangle=140)
+    plt.title("Expenditure Distribution by Category")
+    plt.axis('equal')
+    plt.tight_layout()
+    plt.show()
+
+def show_monthly_summary():
+    if not os.path.exists(FILE_NAME):
+        messagebox.showerror("Error", "No transactions found to display.")
+        return
+
+    monthly_income = defaultdict(float)
+    monthly_expense = defaultdict(float)
+
+    with open(FILE_NAME, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            try:
+                date = datetime.strptime(row['Date'], '%Y-%m-%d')
+            except Exception:
+                continue
+            month_year = date.strftime('%Y-%m')
+            try:
+                amount = float(row['Amount'])
+            except Exception:
+                amount = 0.0
+            if row['Type'].lower() == 'income':
+                monthly_income[month_year] += amount
+            else:
+                monthly_expense[month_year] += amount
+
+    months = sorted(set(list(monthly_income.keys()) + list(monthly_expense.keys())))
+    if not months:
+        messagebox.showinfo("Info", "No monthly data to display.")
+        return
+
+    incomes = [monthly_income.get(m, 0.0) for m in months]
+    expenses = [monthly_expense.get(m, 0.0) for m in months]
+    net = [inc - exp for inc, exp in zip(incomes, expenses)]
+
+    plt.figure(figsize=(12, 6))
+    x = range(len(months))
+    width = 0.3
+    plt.bar([i - width for i in x], incomes, width, label='Income', color='green')
+    plt.bar([i for i in x], expenses, width, label='Expenditure', color='red')
+    plt.bar([i + width for i in x], net, width, label='Net', color='skyblue')
+    plt.xlabel("Month")
+    plt.ylabel("Amount (KES)")
+    plt.title("Monthly Income / Expenditure / Net")
+    plt.xticks(x, months, rotation=45, ha='right')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def export_monthly_summary():
+    if not os.path.exists(FILE_NAME):
+        messagebox.showerror("Error", "No transactions found to export.")
+        return
+
+    monthly_income = defaultdict(float)
+    monthly_expense = defaultdict(float)
+
+    with open(FILE_NAME, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            try:
+                date = datetime.strptime(row['Date'], '%Y-%m-%d')
+            except Exception:
+                continue
+            month_year = date.strftime('%Y-%m')
+            try:
+                amount = float(row['Amount'])
+            except Exception:
+                amount = 0.0
+            if row['Type'].lower() == 'income':
+                monthly_income[month_year] += amount
+            else:
+                monthly_expense[month_year] += amount
+
+    months = sorted(set(list(monthly_income.keys()) + list(monthly_expense.keys())))
+    if not months:
+        messagebox.showinfo("Info", "No data to export")
+        return
+
+    with open('monthly_summary.csv', mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Month', 'Income (KES)', 'Expenditure (KES)', 'Net (KES)'])
+        for m in months:
+            inc = monthly_income.get(m, 0.0)
+            exp = monthly_expense.get(m, 0.0)
+            net = inc - exp
+            writer.writerow([m, f"{inc:.2f}", f"{exp:.2f}", f"{net:.2f}"])
+
+    messagebox.showinfo("Exported", "Monthly summary exported successfully as monthly_summary.csv")
+
+# --- GUI setup ---
+init_file()
+root = tk.Tk()
+root.title("Expense & Income Tracker")
+root.geometry("1150x650")
+root.resizable(False, False)
+
+# Input frame
+input_frame = tk.Frame(root, padx=10, pady=10)
+input_frame.pack(fill=tk.X)
+
+# Date
+date_label = tk.Label(input_frame, text="Date (YYYY-MM-DD):")
+date_label.grid(row=0, column=0, padx=5, pady=5, sticky='w')
+date_entry = tk.Entry(input_frame)
+date_entry.insert(0, datetime.now().strftime('%Y-%m-%d'))
+date_entry.grid(row=0, column=1, padx=5, pady=5)
+
+# Type (Income/Expenditure)
+type_label = tk.Label(input_frame, text="Type:")
+type_label.grid(row=0, column=2, padx=5, pady=5, sticky='w')
+type_var = tk.StringVar(value="Expenditure")
+type_combo = ttk.Combobox(input_frame, textvariable=type_var, values=["Income", "Expenditure"], state="readonly", width=15)
+type_combo.grid(row=0, column=3, padx=5, pady=5)
+type_combo.set("Expenditure")
+
+# Category
+category_label = tk.Label(input_frame, text="Category:")
+category_label.grid(row=1, column=0, padx=5, pady=5, sticky='w')
+category_entry = tk.Entry(input_frame)
+category_entry.grid(row=1, column=1, padx=5, pady=5)
+
+# Description
+description_label = tk.Label(input_frame, text="Description:")
+description_label.grid(row=1, column=2, padx=5, pady=5, sticky='w')
+description_entry = tk.Entry(input_frame, width=40)
+description_entry.grid(row=1, column=3, padx=5, pady=5, columnspan=2)
+
+# Amount
+amount_label = tk.Label(input_frame, text="Amount:")
+amount_label.grid(row=2, column=0, padx=5, pady=5, sticky='w')
+amount_entry = tk.Entry(input_frame)
+amount_entry.grid(row=2, column=1, padx=5, pady=5)
+
+# Add transaction button
+add_button = tk.Button(input_frame, text="Add Transaction", command=add_transaction, width=20)
+add_button.grid(row=2, column=3, padx=5, pady=10, sticky='e')
+
+# Search frame
+search_frame = tk.Frame(root, padx=10, pady=5)
+search_frame.pack(fill=tk.X)
+search_label = tk.Label(search_frame, text="Search (Category / Description / Type):")
+search_label.pack(side=tk.LEFT, padx=5)
+search_entry = tk.Entry(search_frame)
+search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+search_button = tk.Button(search_frame, text="Search", command=lambda: search_transactions(search_entry.get()))
+search_button.pack(side=tk.LEFT, padx=5)
+reset_button = tk.Button(search_frame, text="Reset", command=load_transactions)
+reset_button.pack(side=tk.LEFT, padx=5)
+
+# Charts and action buttons
+chart_frame = tk.Frame(root)
+chart_frame.pack(pady=8)
+
+bar_btn = tk.Button(chart_frame, text="📊 Category Bar Chart", command=show_category_bar_chart)
+bar_btn.pack(side=tk.LEFT, padx=6)
+
+pie_btn = tk.Button(chart_frame, text="🥧 Expenditure Pie Chart", command=show_spending_pie_chart)
+pie_btn.pack(side=tk.LEFT, padx=6)
+
+monthly_btn = tk.Button(chart_frame, text="📅 Monthly Summary Chart", command=show_monthly_summary)
+monthly_btn.pack(side=tk.LEFT, padx=6)
+
+export_btn = tk.Button(chart_frame, text="📥 Export Monthly Summary", command=export_monthly_summary)
+export_btn.pack(side=tk.LEFT, padx=6)
+
+delete_button = tk.Button(chart_frame, text="Delete Selected Transaction", command=delete_transaction)
+delete_button.pack(side=tk.LEFT, padx=6)
+
+# Transaction Table
+trans_table = ttk.Treeview(root, columns=("Date", "Type", "Category", "Description", "Amount"), show="headings")
+trans_table.heading("Date", text="Date")
+trans_table.heading("Type", text="Type")
+trans_table.heading("Category", text="Category")
+trans_table.heading("Description", text="Description")
+trans_table.heading("Amount", text="Amount (KES)")
+trans_table.column("Description", width=400)
+trans_table.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+# Total label
+total_label = tk.Label(root, text="Income: KES 0.00    Expenditure: KES 0.00    Net: KES 0.00", font=("Arial", 14))
+total_label.pack(pady=5)
+
+# Load existing transactions
+load_transactions()
+
+# Start GUI loop
+root.mainloop()
